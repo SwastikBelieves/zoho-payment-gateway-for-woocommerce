@@ -75,45 +75,84 @@ class WC_Gateway_Zoho extends WC_Payment_Gateway {
         return ['result' => 'success', 'redirect' => $order->get_checkout_order_received_url()];
     }
 
-    public function thankyou_page($order_id) {
-        $order = wc_get_order($order_id);
-        $session_id = get_post_meta($order_id, '_zoho_payment_session_id', true);
-        if (!$session_id) return;
+    // Modified thankyou_page function
+public function thankyou_page($order_id) {
+    $order = wc_get_order($order_id);
+    if (!$order) return;
 
-        echo '<script src="https://static.zohocdn.com/zpay/zpay-js/v1/zpayments.js"></script>';
-        echo '<script>
+    // Only trigger widget if the order is unpaid
+    if (in_array($order->get_status(), ['processing', 'completed'])) {
+        return;
+    }
+
+    $session_id = get_post_meta($order_id, '_zoho_payment_session_id', true);
+    if (!$session_id) return;
+
+    $nonce = wp_create_nonce('zoho_payment_update');
+
+    echo '<script src="https://static.zohocdn.com/zpay/zpay-js/v1/zpayments.js"></script>';
+    echo '<script>
+        document.addEventListener("DOMContentLoaded", function() {
             const config = {
                 account_id: "' . esc_js($this->account_id) . '",
                 domain: "IN",
                 otherOptions: { api_key: "' . esc_js($this->api_key) . '" }
             };
+
             const instance = new window.ZPayments(config);
-            async function initiatePayment() {
+
+            async function handlePayment() {
                 try {
-                    let options = {
+                    const options = {
                         amount: "' . $order->get_total() . '",
                         currency_code: "INR",
                         payments_session_id: "' . esc_js($session_id) . '",
-                        currency_symbol: "₹",
                         business: "' . esc_js($this->business_name) . '",
                         description: "Payment for Order #' . $order_id . '",
                         invoice_number: "INV-' . $order_id . '",
-                        reference_number: "REF-' . $order_id . '",
                         address: {
-                            name: "' . esc_js($order->get_billing_first_name()) . '",
+                            name: "' . esc_js($order->get_billing_first_name() . ' ' . $order->get_billing_last_name()) . '",
                             email: "' . esc_js($order->get_billing_email()) . '",
                             phone: "' . esc_js($order->get_billing_phone()) . '"
                         }
                     };
-                    const data = await instance.requestPaymentMethod(options);
-                    console.log("Zoho Payment Result:", data);
-                } catch (err) {
-                    console.error("Zoho Payment Error:", err);
+
+                    const result = await instance.requestPaymentMethod(options);
+                    console.log("Zoho Payment Result:", result);
+
+                    if (result.payment_id) {
+                        const response = await fetch("' . admin_url('admin-ajax.php') . '", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                            body: new URLSearchParams({
+                                action: "zoho_confirm_payment",
+                                order_id: "' . $order_id . '",
+                                session_id: "' . esc_js($session_id) . '",
+                                nonce: "' . $nonce . '",
+                                account_id: "' . esc_js($this->account_id) . '"
+                            })
+                        });
+
+                        const data = await response.json();
+                        if (data.success) {
+                            window.location.reload();
+                        } else {
+                            alert("Payment verification failed: " + (data.data || "Unknown error"));
+                        }
+                    }
+                } catch (error) {
+                    console.error("Payment error:", error);
+                    alert("Payment failed: " + error.message);
                 } finally {
                     await instance.close();
                 }
             }
-            initiatePayment();
-        </script>';
-    }
+
+            handlePayment();
+        });
+    </script>';
+}
+
+
+
 }
