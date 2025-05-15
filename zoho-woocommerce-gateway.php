@@ -96,3 +96,54 @@ function zoho_get_access_token() {
 register_deactivation_hook(__FILE__, function () {
     wp_clear_scheduled_hook('zoho_refresh_access_token_event');
 });
+
+
+add_action('wp_ajax_zoho_confirm_payment', 'zoho_confirm_payment');
+add_action('wp_ajax_nopriv_zoho_confirm_payment', 'zoho_confirm_payment');
+
+function zoho_confirm_payment() {
+    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'zoho_payment_update')) {
+        wp_send_json_error(__('Security check failed', 'zoho-woocommerce-gateway'));
+    }
+
+    $order_id   = intval($_POST['order_id']);
+    $session_id = sanitize_text_field($_POST['session_id']);
+    $order      = wc_get_order($order_id);
+
+    if (!$order || !$session_id) {
+        wp_send_json_error(__('Invalid order or session ID.', 'zoho-woocommerce-gateway'));
+    }
+
+    $token      = zoho_get_access_token(); // Make sure this returns a valid token
+    
+    $account_id = sanitize_text_field($_POST['account_id']);
+
+    $url = "https://payments.zoho.in/api/v1/paymentsessions/{$session_id}?account_id={$account_id}";
+
+    $response = wp_remote_get($url, [
+        'headers' => [
+            'Authorization' => 'Zoho-oauthtoken ' . $token,
+        ]
+    ]);
+
+    if (!is_wp_error($response)) {
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+
+        if (
+            isset($body['payments_session']['status']) &&
+            $body['payments_session']['status'] === 'succeeded'
+        ) {
+            $payment_id = $body['payments_session']['payments'][0]['payment_id'] ?? '';
+            $order->payment_complete($payment_id);
+            $order->add_order_note(__('Zoho payment confirmed. Payment ID: ', 'zoho-woocommerce-gateway') . $payment_id);
+            wp_send_json_success();
+        } else {
+            $error_message = $body['message'] ?? __('Unknown payment status', 'zoho-woocommerce-gateway');
+            $order->update_status('failed', $error_message);
+            wp_send_json_error($error_message);
+        }
+    }
+
+    wp_send_json_error(__('Payment verification failed', 'zoho-woocommerce-gateway'));
+}
+
