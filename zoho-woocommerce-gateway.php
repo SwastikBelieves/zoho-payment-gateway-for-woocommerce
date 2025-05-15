@@ -3,7 +3,7 @@
  * Plugin Name:       Zoho WooCommerce Gateway
  * Plugin URI:        https://github.com/SwastikBelieves/zoho-payment-gateway-for-woocommerce
  * Description:       Accept payments via Zoho Payments for WooCommerce. For assistance get in touch with me at hello@swastik.dev
- * Version:           1.0
+ * Version:           1.1
  * Requires at least: 5.7
  * Requires PHP:      7.4
  * Author:            Swastik Chakraborty
